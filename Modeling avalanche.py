@@ -43,8 +43,11 @@ def propagate_avalanche(terrain, i0, j0):
     Ni, Nj = terrain.shape #Dimensions of the forest
 
     fs = 0 #Initalises fire size as 0
+    runoff_dist = False
 
     if terrain[i0, j0] == max_num_particles: #Tree where lightning strikes
+        start = [i0, j0]
+        runoff_dist = 0
         active_i = [i0] #Initalises list of things on fire
         active_j = [j0] #Initalises list of trees on fire
         terrain[i0, j0] = 0 #Sets tree on fire
@@ -69,6 +72,9 @@ def propagate_avalanche(terrain, i0, j0):
                     next_i.append(i)
                     next_j.append(j)
                     terrain[i,j] = 0
+                    dist = np.sqrt((i-start[0])**2 + (j-start[1])**2)
+                    if dist > runoff_dist:
+                        runoff_dist = dist
                     fs += 1
 
                 #Coordinates of cell down
@@ -85,6 +91,9 @@ def propagate_avalanche(terrain, i0, j0):
                     next_i.append(i)
                     next_j.append(j)
                     terrain[i,j] = 0
+                    dist = np.sqrt((i-start[0])**2 + (j-start[1])**2)
+                    if dist > runoff_dist:
+                        runoff_dist = dist
                     fs += 1
                 
                 #Coordinates of cell left
@@ -101,6 +110,9 @@ def propagate_avalanche(terrain, i0, j0):
                     next_i.append(i)
                     next_j.append(j)
                     terrain[i,j] = 0
+                    dist = np.sqrt((i-start[0])**2 + (j-start[1])**2)
+                    if dist > runoff_dist:
+                        runoff_dist = dist
                     fs += 1
                 
                 #Coordinates of cell right
@@ -117,6 +129,9 @@ def propagate_avalanche(terrain, i0, j0):
                     next_i.append(i)
                     next_j.append(j)
                     terrain[i,j] = 0
+                    dist = np.sqrt((i-start[0])**2 + (j-start[1])**2)
+                    if dist > runoff_dist:
+                        runoff_dist = dist
                     fs += 1
 
                 #Coordinates of cell right up
@@ -163,7 +178,8 @@ def propagate_avalanche(terrain, i0, j0):
             active_i = next_i
             active_j = next_j 
         
-    return fs, terrain
+        
+    return fs, terrain, runoff_dist
 
 #Initalise system
 #N = 100 #Side of the forest
@@ -199,7 +215,7 @@ size_of_terrain = 100
 #Determine exponent for eth empirical cCDF by a linear fit
 global_min_rel_size = 1e-3
 global_max_rel_size = 5e-2
-gravity_list = []
+gravity_list = [9.18, 5.19]
 
 all_avg_alpha = []
 all_stdev_alpha = []
@@ -215,7 +231,7 @@ for idx, g in enumerate(gravity_list):
 
     for rep in range(repititions):
         terrain = np.zeros([size_of_terrain,size_of_terrain]) #Empty forest
-        avalanche_size = [] #Empty list of fire sizes
+        runoff_dist_list = [] #Empty list of fire sizes
 
         Ni, Nj = terrain.shape
 
@@ -223,7 +239,9 @@ for idx, g in enumerate(gravity_list):
 
         num_avalanches = 0
 
-        while num_avalanches < target_num_avalanches:
+        runoff = False
+
+        while not runoff:
             print(idx, rep, num_avalanches)
 
             terrain = stones_added(terrain, p)
@@ -235,16 +253,16 @@ for idx, g in enumerate(gravity_list):
 
                 #T = int(np.sum(forest)) #Current number of trees
 
-                fs, terrain = propagate_avalanche(terrain, i0, j0)
-                if fs > 0:
-                    avalanche_size.append(fs)
-                    num_avalanches += 1
+                fs, terrain, runoff = propagate_avalanche(terrain, i0, j0)
+                runoff_dist_list.append(runoff)
+                #if fs > 0:
+                #    avalanche_size.append(fs)
+                #    num_avalanches += 1
 
-            terrain[np.where(terrain == -1)] = 0
-        print(f'Target of {target_num_avalanches} fire events reached')
+            #terrain[np.where(terrain == 4)] = 0
 
         #Lets compare the forests
-        c_CDF, s_rel = complementary_CDF(avalanche_size, terrain.size)
+        c_CDF, s_rel = complementary_CDF(runoff_dist_list, terrain.size)
 
         c_CDF_list.append(c_CDF)
         s_rel_list.append(s_rel)
@@ -302,12 +320,12 @@ plt.show()
 #stdev_alpha is list
 
 #N_rev = [x**-1 for x in N_list]
-y_error_min = [all_stdev_alpha[i] for i in range(repititions+1)]
-y_error_max = [all_stdev_alpha[i] for i in range(repititions+1)]
+#y_error_min = [all_stdev_alpha[i] for i in range(repititions+1)]
+#y_error_max = [all_stdev_alpha[i] for i in range(repititions+1)]
 
-print(len(y_error_max))
-print(len(all_avg_alpha))
-y_error = [y_error_min, y_error_max]
+#print(len(y_error_max))
+#print(len(all_avg_alpha))
+#y_error = [y_error_min, y_error_max]
 
-plt.errorbar(N_rev, all_avg_alpha, yerr=y_error, fmt = 'o')
+#plt.errorbar(N_rev, all_avg_alpha, yerr=y_error, fmt = 'o')
 plt.show()

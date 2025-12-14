@@ -16,6 +16,9 @@ def slope_for_gravity(g):
     dynamic_slope = math.tan(math.radians(dynamic_angle))
     return static_slope, dynamic_slope
 
+#More stones topple if the gravity is higher I think, but I got to find a source?
+def stones_per_topple(g):
+    return max(1, int(9.81 / g))
 
 def stones_added(terrain, p):
     """
@@ -51,6 +54,8 @@ def propagate_avalanche(terrain, i0, j0, g):
     i0: First index of the cell where the avalanche occurs
     j0: Second index of the cell where the avalanche occurs
     """
+    n_stones = stones_per_topple(g)
+
     static, dynamic = slope_for_gravity(g)
 
     Ni, Nj = terrain.shape #Dimensions of the terrain
@@ -61,33 +66,23 @@ def propagate_avalanche(terrain, i0, j0, g):
     start = [i0, j0]
     runoff_dist = 0
 
-    current_height = terrain[i0, j0]
-
-    #The avalnche moves to the right, either straight to the right, or to right up/right down
+   
     avalanche  = False
+    directions = [[0,1], [0, -1], [1, 0], [-1, 0]]
+    active_i = []
+    active_j = []
     direction_with_less = []
-    for di in [-1, 0, 1]:
+    for di, dj in directions: 
         ni = i0 + di
-        nj = j0 + 1
-        if 0 <= ni < Ni and nj < Nj:
+        nj = j0 + dj
+        if 0 <= ni < Ni and 0 <= nj < Nj:
             angle = terrain[i0, j0] - terrain[ni, nj]
-        
-        if not avalanche and angle <= static:
-            terrian = terrain
-            runoff_dist = 0.0
-        else:
-            direction_with_less.append([ni, nj])
-            avalanche = True
-    
-    if not avalanche:
-        return terrain, runoff_dist
-    
-    for directions in direction_with_less:
-        terrain[i0, j0] -= 1
-        terrain[directions] += 1
-
-        active_i.append(directions[0])
-        active_j.append(directions[1])
+            if angle > static:
+                terrain[i0, j0] -= n_stones
+                terrain[ni, nj] += n_stones
+                active_i.append(ni)
+                active_j.append(nj)
+                runoff_dist = max(runoff_dist, nj - j0)
 
 
     while active_i:
@@ -103,22 +98,29 @@ def propagate_avalanche(terrain, i0, j0, g):
             
             current_height = terrain[i, j]
 
-            neighbour_heights_list = [terrain[i, j+1], terrain[i-1, j+1], terrain[i+1, j+1]]
-            #neighbour_height = terrain[i, j+1]
- 
 
-            for ni, nj in neighbour_heights_list:
-                angle = terrain[i,j] - terrain[ni, nj]
-                if angle > dynamic:
-                    terrain[i, j] -= 1
-                    terrain[ni, nj] += 1
+            neighbour_heights_list = []
+            for (di, dj) in directions:
+                ni = i + di
+                nj = j + dj
 
-                    next_i.append(ni)
-                    next_j.append(nj)
+                if 0 <= ni < Ni and 0 <= nj < Nj:
+                    angle = terrain[i,j] - terrain[ni, nj]
 
-                    dist = np.sqrt((ni - start[0])**2 + (nj - start[1])**2)
-                    if dist > runoff_dist:
-                        runoff_dist = dist
+                    #To add some randomness, since real granular flow is kind of stiochastic, especially right at the border
+
+                    p_avalanche = min(1, (angle - dynamic) / dynamic)
+                    if np.random.rand() < p_avalanche:
+
+                        terrain[i, j] -= n_stones
+                        terrain[ni, nj] += n_stones
+
+                        next_i.append(ni)
+                        next_j.append(nj)
+
+                        dist = nj - start[1] #Since runout is generally defined as the downlope trravel dist
+                        if dist > runoff_dist:
+                            runoff_dist = dist
 
             
         active_i = next_i
@@ -134,8 +136,8 @@ f = 0.2 #New stone probability probability
 
 
 target_num_avalanches = 300 
-repititions = 10
-size_of_terrain = 100
+repititions = 25
+size_of_terrain = 150
 
 all_runouts = {planet: [] for planet, g in planet_data}
 mean_runouts_per_rep = {planet: [] for planet, g in planet_data}

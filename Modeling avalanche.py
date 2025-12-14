@@ -1,12 +1,13 @@
 import numpy as np
 from matplotlib import pyplot as plt
 import math
+from numba import njit
 
 np.random.seed(5)
 
-max_steps = 10000
-static = 47.0
-dynamic = 43.0
+max_steps = 1000
+static = 4
+dynamic = 2
 planet_data = [("Mercury", 3.70), ("Venus", 8.87), ("Earth", 9.81), ("Mars", 3.71), ("Jupiter", 24.79), ("Saturn", 10.44), ("Uranus", 8.69), ("Neptune", 11.15)]
 
 #def slope_for_gravity(g):
@@ -17,17 +18,23 @@ planet_data = [("Mercury", 3.70), ("Venus", 8.87), ("Earth", 9.81), ("Mars", 3.7
 #    dynamic_slope = math.tan(math.radians(dynamic_angle))
 #    return static_slope, dynamic_slope
 
-def friction_for_gravity(g, g_ref = 9.81):
+def mass_move_calc(g, g_ref = 9.81, mass_move_max = 1.0, mass_move_min = 0.05):
     #F_friction = mu * m * g
-    #mu and m stay the same, the only thing that changes is g
+    #mu and m stay the same, the only thing t$g_0hat changes is g
     #Bcs this is just a sandpile model of the system, 
     #that just aims to scale them, not find actual valeus
-    return g/g_ref
+    val = np.sqrt(g_ref/g)
+
+
+    return max(min(val, mass_move_max), mass_move_min) #https://www.nature.com/articles/s41526-023-00308-w
     
 
 #More stones topple if the gravity is lower I think, but I got to find a source?
+@njit
 def stones_per_topple(g):
-    return max(1, int(9.81 / g))
+    orig_n_stones = max(1, int(9.81 / g))
+    #friction_stones = max (1, int(orig_n_stones*fric))
+    return orig_n_stones
 
 def stones_added(terrain, p):
     """
@@ -48,10 +55,11 @@ def stones_added(terrain, p):
 
     return terrain
 
-directions = [[0,1], [0, -1], [1, 0], [-1, 0]]
+directions = ((0,1),(0, -1),(1, 0), (-1, 0))
 min_runoff = 2.0
 
-def propagate_avalanche(terrain, i0, j0, grav):
+@njit
+def propagate_avalanche(terrain, i0, j0, n_stones, mass_move):
     """
     Function to propagate the avalanche on a terrain.
     
@@ -61,8 +69,8 @@ def propagate_avalanche(terrain, i0, j0, grav):
     i0: First index of the cell where the avalanche occurs
     j0: Second index of the cell where the avalanche occurs
     """
-    n_stones = grav[0]
-    frac = grav[1]
+    #n_stones = grav[0]
+    #fric = grav[1]
 
     Ni, Nj = terrain.shape #Dimensions of the terrain
 
@@ -76,7 +84,6 @@ def propagate_avalanche(terrain, i0, j0, grav):
    
     avalanche  = False
     active = []
-    direction_with_less = []
     for di, dj in directions: 
         ni = i0 + di
         nj = j0 + dj
@@ -101,8 +108,6 @@ def propagate_avalanche(terrain, i0, j0, grav):
             
             current_height = terrain[i, j]
 
-
-            neighbour_heights_list = []
             for (di, dj) in directions:
                 ni = i + di
                 nj = j + dj
@@ -112,16 +117,16 @@ def propagate_avalanche(terrain, i0, j0, grav):
 
                     #To add some randomness, since real granular flow is kind of stiochastic, especially right at the border
 
-                    if angle > dynamic:
-                        p_avalanche = frac * min(1, (angle - dynamic) / dynamic) #Friction
-                        if np.random.rand() < p_avalanche:
+                    if angle >= dynamic + 1:
+                        p_avalanche = min(1.0, mass_move * (angle - dynamic) / dynamic) #Friction
+                        if np.random.rand() < p_avalanche and 0.05 < p_avalanche:
 
                             terrain[i, j] -= min(n_stones, terrain[i, j] - terrain[ni, nj])
                             terrain[ni, nj] += min(n_stones, terrain[i, j] - terrain[ni, nj])
 
                             next.append((ni, nj))
 
-                            dist = np.sqrt((ni - i0)**2 + (j - j0)**2) #Since runout is generally defined as the downlope trravel dist
+                            dist = np.sqrt((ni - i0)**2 + (nj - j0)**2) #Since runout is generally defined as the downlope trravel dist
                             if dist > runoff_dist:
                                 runoff_dist = dist
         
@@ -140,16 +145,18 @@ f = 0.2 #New stone probability probability
 
 
 target_num_avalanches = 300 
-repititions = 25
-size_of_terrain = 150
+repititions = 20
+size_of_terrain = 125
 
 all_runouts = {planet: [] for planet, g in planet_data}
 mean_runouts_per_rep = {planet: [] for planet, g in planet_data}
 
 for planet, g in planet_data:
-    mu_fric = friction_for_gravity(g)
+    mass_move = mass_move_calc(g)
+    stones = stones_per_topple(g)
+    
     print(planet)
-    gravity_factors = [stones_per_topple(g), friction_for_gravity(g)]
+    #gravity_factors = [stones, mu_fric]
 
     for rep in range(repititions):
         print(rep)
@@ -166,15 +173,13 @@ for planet, g in planet_data:
 
             terrain = stones_added(terrain, p)
 
-            p_stone = np.random.rand()
-            if p_stone < f:
-                i0 = np.random.randint(Ni)
-                j0 = np.random.randint(Nj)
+            i0 = np.random.randint(Ni)
+            j0 = np.random.randint(Nj)
 
-                terrain, runoff = propagate_avalanche(terrain, i0, j0, gravity_factors)
-                if runoff >= min_runoff:
-                    runoff_dist_list.append(runoff)
-                    num_avalanches += 1
+            terrain, runoff = propagate_avalanche(terrain, i0, j0, stones, mass_move)
+            if runoff > 0:
+                runoff_dist_list.append(runoff)
+                num_avalanches += 1
 
         if runoff_dist_list:
             mean_runouts_per_rep[planet].append(np.mean(runoff_dist_list))

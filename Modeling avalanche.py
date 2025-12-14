@@ -63,17 +63,32 @@ def propagate_avalanche(terrain, i0, j0, g):
 
     current_height = terrain[i0, j0]
 
+    #The avalnche moves to the right, either straight to the right, or to right up/right down
+    avalanche  = False
+    direction_with_less = []
+    for di in [-1, 0, 1]:
+        ni = i0 + di
+        nj = j0 + 1
+        if 0 <= ni < Ni and nj < Nj:
+            angle = terrain[i0, j0] - terrain[ni, nj]
+        
+        if not avalanche and angle <= static:
+            terrian = terrain
+            runoff_dist = 0.0
+        else:
+            direction_with_less.append([ni, nj])
+            avalanche = True
+    
+    if not avalanche:
+        return terrain, runoff_dist
+    
+    for directions in direction_with_less:
+        terrain[i0, j0] -= 1
+        terrain[directions] += 1
 
-    neighbour_height = terrain[i0, j0+1]
-    angle = (current_height-neighbour_height)
-    if angle <= static:
-        return terrain, 0.0
+        active_i.append(directions[0])
+        active_j.append(directions[1])
 
-    terrain[i0, j0] -= 1 
-    terrain[i0, j0+1] += 1
-
-    active_i = [i0] 
-    active_j = [j0+1]
 
     while active_i:
         next_i = []
@@ -84,23 +99,27 @@ def propagate_avalanche(terrain, i0, j0, g):
 
             if j >= Nj -1: 
                 continue #If we cant go further
+
             
             current_height = terrain[i, j]
-            neighbour_height = terrain[i, j+1]
 
+            neighbour_heights_list = [terrain[i, j+1], terrain[i-1, j+1], terrain[i+1, j+1]]
+            #neighbour_height = terrain[i, j+1]
+ 
 
-            angle = current_height-neighbour_height
+            for ni, nj in neighbour_heights_list:
+                angle = terrain[i,j] - terrain[ni, nj]
+                if angle > dynamic:
+                    terrain[i, j] -= 1
+                    terrain[ni, nj] += 1
 
-            if angle > dynamic:
-                terrain[i, j] -= 1
-                terrain[i, j+1] += 1
+                    next_i.append(ni)
+                    next_j.append(nj)
 
-                next_i.append(i)
-                next_j.append(j+1)
+                    dist = np.sqrt((ni - start[0])**2 + (nj - start[1])**2)
+                    if dist > runoff_dist:
+                        runoff_dist = dist
 
-                dist = np.sqrt((i-start[0])**2 + ((j+1)-start[1])**2)
-                if dist > runoff_dist:
-                    runoff_dist = dist
             
         active_i = next_i
         active_j = next_j 

@@ -5,7 +5,7 @@ from numba import njit
 
 np.random.seed(5)
 
-max_steps = 1000
+max_steps = 500
 static = 4
 dynamic = 2
 planet_data = [("Mercury", 3.70), ("Venus", 8.87), ("Earth", 9.81), ("Mars", 3.71), ("Jupiter", 24.79), ("Saturn", 10.44), ("Uranus", 8.69), ("Neptune", 11.15)]
@@ -18,7 +18,7 @@ planet_data = [("Mercury", 3.70), ("Venus", 8.87), ("Earth", 9.81), ("Mars", 3.7
 #    dynamic_slope = math.tan(math.radians(dynamic_angle))
 #    return static_slope, dynamic_slope
 
-def mass_move_calc(g, g_ref = 9.81, mass_move_max = 1.0, mass_move_min = 0.05):
+def mass_move_calc(g, g_ref = 9.81, mass_move_max = 2.0, mass_move_min = 0.05):
     #F_friction = mu * m * g
     #mu and m stay the same, the only thing t$g_0hat changes is g
     #Bcs this is just a sandpile model of the system, 
@@ -27,12 +27,12 @@ def mass_move_calc(g, g_ref = 9.81, mass_move_max = 1.0, mass_move_min = 0.05):
 
 
     return max(min(val, mass_move_max), mass_move_min) #https://www.nature.com/articles/s41526-023-00308-w
-    
+
 
 #More stones topple if the gravity is lower I think, but I got to find a source?
 @njit
 def stones_per_topple(g):
-    orig_n_stones = max(1, int(9.81 / g))
+    orig_n_stones = max(1, int(2 * 9.81 / g))
     #friction_stones = max (1, int(orig_n_stones*fric))
     return orig_n_stones
 
@@ -74,9 +74,9 @@ def propagate_avalanche(terrain, i0, j0, n_stones, mass_move):
 
     Ni, Nj = terrain.shape #Dimensions of the terrain
 
-    if j0 >= Nj - 1:
-        terrain[i0, j0] -= n_stones
+    if 1 >= j0 >= Nj - 1 or 1 >= i0 >= Nj - 1:
         return terrain, 0.0
+
 
     start = [i0, j0]
     runoff_dist = 0
@@ -101,9 +101,8 @@ def propagate_avalanche(terrain, i0, j0, n_stones, mass_move):
         next = []
         for i, j in active:
 
-            if j >= Nj -1: 
-                terrain[i, j] -= n_stones
-                continue #If we cant go further
+            if 1 >= j0 >= Nj - 1 or 1 >= i0 >= Nj - 1:
+                continue
 
             
             current_height = terrain[i, j]
@@ -146,7 +145,7 @@ f = 0.2 #New stone probability probability
 
 target_num_avalanches = 300 
 repititions = 20
-size_of_terrain = 125
+size_of_terrain = 150
 
 all_runouts = {planet: [] for planet, g in planet_data}
 mean_runouts_per_rep = {planet: [] for planet, g in planet_data}
@@ -195,10 +194,10 @@ for planet, g in planet_data:
 gravities = [g for planet, g in planet_data]
 
 planet_colours = {
-    "Mercury": "red",
+    "Mercury": "brown",
     "Venus" : "orange",
     "Earth": "green",
-    "Mars": "brown",
+    "Mars": "red",
     "Jupiter": "blue",
     "Saturn": "purple",
     "Uranus": "cyan",
@@ -230,9 +229,13 @@ corr_mean = np.corrcoef(gravities, planet_means)[0,1]
 
 from scipy.stats import skew, kurtosis
 for planet, g in planet_data: 
+    counts, bins = np.histogram(all_runouts[planet], bins = 30)
+    for i in range(len(counts)):
+        print(f"Bin {i+1}: [{bins[i], bins[i+1]}] has {counts[i]} events")
     plt.figure()
     plt.hist(all_runouts[planet], bins = 30)
     plt.title(f"Runout distribution for {planet} (g= {g})")
+    plt.yscale("log")
     plt.xlabel("Runout distance")
     plt.ylabel("Frequency")
     plt.show()
@@ -240,7 +243,8 @@ for planet, g in planet_data:
     data = all_runouts[planet]
     if len(data) > 0:
         median_val = np.median(data)
+        mean_val = np.mean(data)
         iqr_val = np.percentile(data, 75) - np.percentile(data, 25)
         skew_val = skew(data)
         kurt_val = kurtosis(data)
-        print(f"{planet}: median={median_val:.2f}, IQR={iqr_val:.2f}, skew={skew_val:.2f}, kurtosis={kurt_val:.2f}")
+        print(f"{planet}: median={median_val:.2f}, mean={mean_val:.2f} IQR={iqr_val:.2f}, skew={skew_val:.2f}, kurtosis={kurt_val:.2f}")

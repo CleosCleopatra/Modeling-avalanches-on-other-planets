@@ -74,7 +74,7 @@ def propagate_avalanche(terrain, i0, j0, n_stones, mass_move):
 
     Ni, Nj = terrain.shape #Dimensions of the terrain
 
-    if 1 >= j0 >= Nj - 1 or 1 >= i0 >= Nj - 1:
+    if j0 <= 1 or j0 >= Nj - 1 or i0 <= 1 or i0 >= Ni-1:
         return terrain, 0.0
 
 
@@ -144,7 +144,7 @@ f = 0.2 #New stone probability probability
 
 
 target_num_avalanches = 300 
-repititions = 20
+repititions = 200
 size_of_terrain = 150
 
 all_runouts = {planet: [] for planet, g in planet_data}
@@ -227,20 +227,24 @@ plt.show()
 
 corr_mean = np.corrcoef(gravities, planet_means)[0,1]
 
-from scipy.stats import skew, kurtosis
-for planet, g in planet_data: 
-    counts, bins = np.histogram(all_runouts[planet], bins = 30)
-    for i in range(len(counts)):
-        print(f"Bin {i+1}: [{bins[i], bins[i+1]}] has {counts[i]} events")
-    plt.figure()
-    plt.hist(all_runouts[planet], bins = 30)
-    plt.title(f"Runout distribution for {planet} (g= {g})")
-    plt.yscale("log")
-    plt.xlabel("Runout distance")
-    plt.ylabel("Frequency")
-    plt.show()
 
+
+from scipy.stats import skew, kurtosis
+fig, axes = plt.subplots(2,4, figsize=(14,16), sharex=True, sharey=True)
+
+all_data = np.concatenate(list(all_runouts.values()))
+bins = np.histogram_bin_edges(all_data, bins = 30)
+
+for ax, (planet, g) in zip(axes.flat, planet_data): 
+    #counts, wins = np.histogram(all_runouts[planet], bins = 30)
+    #for i in range(len(counts)):
+    #    print(f"Bin {i+1}: [{wins[i], wins[i+1]}] has {counts[i]} events")
+    #plt.figure()
     data = all_runouts[planet]
+    ax.hist(data, bins = bins, color=planet_colours[planet], alpha=0.8)
+    ax.set_title(f"{planet} g={g}")
+    ax.set_yscale("log")
+    #data = all_runouts[planet]
     if len(data) > 0:
         median_val = np.median(data)
         mean_val = np.mean(data)
@@ -248,3 +252,10 @@ for planet, g in planet_data:
         skew_val = skew(data)
         kurt_val = kurtosis(data)
         print(f"{planet}: median={median_val:.2f}, mean={mean_val:.2f} IQR={iqr_val:.2f}, skew={skew_val:.2f}, kurtosis={kurt_val:.2f}")
+
+fig.supxlabel("Runout distance")
+fig.supylabel("Frequency")
+fig.suptitle("Runout distance distribution across planets")
+#plt.tight_layout()
+plt.show()
+

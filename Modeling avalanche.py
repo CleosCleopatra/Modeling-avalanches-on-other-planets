@@ -5,7 +5,7 @@ from numba import njit
 
 np.random.seed(5)
 
-max_steps = 500
+max_steps = 50
 planets = ["Mercury", "Venus", "Earth", "Mars", "Jupiter", "Saturn", "Uranus", "Neptune"]
 planet_data = [("Mercury", 3.70), ("Venus", 8.87), ("Earth", 9.81), ("Mars", 3.71), ("Jupiter", 24.79), ("Saturn", 10.44), ("Uranus", 8.69), ("Neptune", 11.15)]
 alpha = 1.0
@@ -34,6 +34,10 @@ def slope_for_gravity(g, static = 6, dynamic = 3):
 
     static = max(static, 0.5)
     dynamic = max(dynamic, 0.1)
+
+    if dynamic >= static:
+        dynamic = static * 0.95
+        
     return static, dynamic
 
 def mass_move_calc(g, g_ref = 9.81, mass_move_max = 2.0, mass_move_min = 0.05):

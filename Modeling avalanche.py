@@ -2,10 +2,11 @@ import numpy as np
 from matplotlib import pyplot as plt
 import math
 from numba import njit
+from scipy.stats import skew, kurtosis
 
 np.random.seed(5)
 
-max_steps = 5 #50
+max_steps = 50 #50
 planets = ["Mercury", "Venus", "Earth", "Mars", "Jupiter", "Saturn", "Uranus", "Neptune"]
 planet_data = [("Mercury", 3.70), ("Venus", 8.87), ("Earth", 9.81), ("Mars", 3.71), ("Jupiter", 24.79), ("Saturn", 10.44), ("Uranus", 8.69), ("Neptune", 11.15)]
 alpha = 1.0
@@ -32,8 +33,8 @@ def slope_for_gravity(g, static = 6, dynamic = 3):
 
     dynamic = dynamic * (1- beta * (1-f))
 
-    static = max(static, 0.5)
-    dynamic = max(dynamic, 0.1)
+    #static = max(static, 0.5)
+    #dynamic = max(dynamic, 0.1)
 
     if dynamic >= static:
         dynamic = static * 0.95
@@ -191,8 +192,8 @@ p = 0.02 #Growth probability
 import seaborn as sns
 
 
-target_num_avalanches = 300 
-repititions = 100
+target_num_avalanches = 30  #300
+repititions = 10 #100
 size_of_terrain = 128
 
 all_runouts = {planet: [] for planet, g in planet_data}
@@ -232,14 +233,21 @@ for planet, g in planet_data:
         affected = np.zeros_like(terrain)
         active_mask = np.zeros_like(affected)
 
+        old_num = 0
         while num_avalanches < target_num_avalanches:
-            if rep == 0:
-                sns.heatmap(terrain, cmap='coolwarm')
-                plt.title(f"Number of rocks per cell, {planet}")
-                plt.xlabel("x")
-                plt.ylabel("y")
-                plt.show()
+            if num_avalanches!=0:
+                if rep == 0 and target_num_avalanches%num_avalanches==0 and old_num != num_avalanches:
+                    if planet == "Jupiter":
+                        vmax_for_planet = 50
+                    else:
+                        vmax_for_planet = 5
+                    sns.heatmap(terrain, vmax = vmax_for_planet, cmap='coolwarm')
+                    plt.title(f"Number of rocks per cell, {planet}, num_avalanches = {num_avalanches}")
+                    plt.xlabel("x")
+                    plt.ylabel("y")
+                    plt.show()
 
+            old_num = num_avalanches
             #print(planet, rep, num_avalanches)
 
             terrain, i0, j0 = stones_added(terrain)
@@ -253,6 +261,7 @@ for planet, g in planet_data:
                 num_avalanches += 1
                 avalanche_sizes_list.append(n_topples)
                 avalanche_areas_list.append(avalanche_area)
+            
 
         if runoff_dist_list:
             mean_runouts_per_rep[planet].append(np.mean(runoff_dist_list))
@@ -318,7 +327,7 @@ for planet, g in planet_data:
 
     #Runout
     rep_means = np.array(mean_runouts_per_rep[planet])
-    mean_runouts.append(np.mean(rep_means))
+    mean_runouts.append(np.median(rep_means))
     err_runouts.append(rep_means.std(ddof=1) / np.sqrt(len(rep_means)))
 
     rep_median = np.array(all_runouts[planet])
@@ -363,7 +372,7 @@ for i, (planet, g) in enumerate(planet_data):
 ax.set_xlabel("Gravity (m/s^2)")
 ax.set_ylabel("Mean runout distance (grid units)")
 #plt.xscale("log")
-plt.yscale("log")
+#plt.yscale("log")
 ax.set_facecolor("none")
 fig.patch.set_alpha(0)
 ax.set_title("Effect of gravity on mean avalanche runout distance")
@@ -541,8 +550,8 @@ for ax, (planet, g) in zip(axes.flat, planet_data):
         std_val = np.std(data)
         max_val = np.max(data)
 
-        skew_val = np.skew(data)
-        kurt_val = np.kurtosis(data)
+        skew_val = skew(data)
+        kurt_val = kurtosis(data)
 
         system_size = size_of_terrain
         large_events = [r for r in data if r > 2]

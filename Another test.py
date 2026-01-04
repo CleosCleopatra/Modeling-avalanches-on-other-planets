@@ -2,11 +2,10 @@ import numpy as np
 from matplotlib import pyplot as plt
 import math
 from numba import njit
-from scipy.stats import skew, kurtosis
 
 np.random.seed(5)
 
-max_steps = 500 #50
+max_steps = 500
 planets = ["Mercury", "Venus", "Earth", "Mars", "Jupiter", "Saturn", "Uranus", "Neptune"]
 planet_data = [("Mercury", 3.70), ("Venus", 8.87), ("Earth", 9.81), ("Mars", 3.71), ("Jupiter", 24.79), ("Saturn", 10.44), ("Uranus", 8.69), ("Neptune", 11.15)]
 alpha = 1.0
@@ -25,6 +24,9 @@ plt.rcParams.update({
 
 plt.margins(y=0.05)
 
+rand_numbers = np.random.rand(10_000_000)
+rand_idx= 0
+
 
 def slope_for_gravity(g, static = 6, dynamic = 3):
     f = np.sqrt(g / 9.81)
@@ -33,15 +35,11 @@ def slope_for_gravity(g, static = 6, dynamic = 3):
 
     dynamic = dynamic * (1- beta * (1-f))
 
-    #static = max(static, 0.5)
-    #dynamic = max(dynamic, 0.1)
-
-    if dynamic >= static:
-        dynamic = static * 0.95
-        
+    static = max(static, 0.5)
+    dynamic = max(dynamic, 0.1)
     return static, dynamic
 
-def mass_move_calc(g, g_ref = 9.81, mass_move_max = 7.0, mass_move_min = 0.05):
+def mass_move_calc(g, g_ref = 9.81, mass_move_max = 2.0, mass_move_min = 0.05):
     #F_friction = mu * m * g
     #mu and m stay the same, the only thing t$g_0hat changes is g
     #Bcs this is just a sandpile model of the system, 
@@ -59,6 +57,7 @@ def stones_per_topple(g):
     #friction_stones = max (1, int(orig_n_stones*fric))
     return 1
 
+@njit
 def stones_added(terrain):
     """
     Function to grow new stones in the terrain.
@@ -80,12 +79,12 @@ def stones_added(terrain):
 
     return terrain, new_rocks_indices[0], new_rocks_indices[1]
 
-directions = ((0,1),(0, -1),(1, 0), (-1, 0))
+directions = np.array([[0,1],[0, -1],[1, 0], [-1, 0]], dtype = np.int64)
 min_runoff = 2.0
-
-n_stones = 1
+from numba.types import List, Array
+from numba import types
 @njit
-def propagate_avalanche(terrain, i0, j0, n_stones, mass_move, static_loc, dynamic_loc, affected, active_mask):
+def propagate_avalanche(terrain, i0, j0, n_stones, mass_move, static_loc, dynamic_loc, rand_num_list, rand_idx):
     """
     Function to propagate the avalanche on a terrain.
     
@@ -98,58 +97,66 @@ def propagate_avalanche(terrain, i0, j0, n_stones, mass_move, static_loc, dynami
     #n_stones = grav[0]
     #fric = grav[1]
     n_topples = 0
-    affected[:] = 0
+    affected = np.zeros_like(terrain)
     affected[i0, j0] = 1
 
     Ni, Nj = terrain.shape #Dimensions of the terrain
 
     if j0 <= 1 or j0 >= Nj - 1 or i0 <= 1 or i0 >= Ni-1:
-        return terrain, 0.0, 0, 0
+        return terrain, 0.0, 0, 0, rand_idx
 
 
     runoff_dist = 0
 
-    active_i = np.empty(max_steps * 4, dtype = np.int32)
-    active_j = np.empty(max_steps * 4, dtype = np.int32)
-    n_active = 1
-    active_i[0] = i0
-    active_j[0] = j0
-    active_mask[:] = 0
+    active = np.zeros((terrain.size, 2), dtype = np.int64)
+    head = 0
+    active[0, 0], active[0, 1] = i0, j0
+    tail = 1
+
+    #active.append((0,0))
+    #active.pop()
+
+    #active.append((i0, j0))
+    active_mask = np.zeros_like(terrain, dtype = np.uint8)
     active_mask[i0, j0] = 1
 
-    for ind, (di, dj) in enumerate(directions): 
+    for k in range(4): 
+        di = directions[k, 0]
+        dj = directions[k, 1]
         ni = i0 + di
         nj = j0 + dj
         if 0 <= ni < Ni and 0 <= nj < Nj:
             angle = terrain[i0, j0] - terrain[ni, nj]
             if angle > static_loc:
-                terrain[i0, j0] -= n_stones
-                terrain[ni, nj] += n_stones
-                active_i[ind] = ni
-                active_j[ind] = nj
+                moved = min(n_stones, terrain[i0, j0])
+                terrain[i0, j0] -= moved
+                terrain[ni, nj] += moved
+
+                active[tail, 0], active[tail, 1]= ni, nj
+                tail += 1
 
                 runoff_dist = max(runoff_dist, np.sqrt((ni - i0)**2 + (nj - j0)**2))
 
     steps = 0
 
-    while n_active > 0 and steps < max_steps:
+    while tail>head and steps < max_steps:
+        current_tail = tail
 
-        new_n_active = 0
-        for k in range(n_active):
-            i = active_i[k]
-            j = active_j[k]
+        while head < current_tail:
+            #for i, j in active:
+            i, j = active[head, 0], active[head, 1]
+            head += 1
 
             if 1 >= j or j >= Nj - 1 or 1 >= i or i >= Ni - 1:
                 continue
 
             thresh = dynamic_loc if active_mask[i, j] else static_loc
 
-            #if terrain[i, j] < thresh:
-            #    continue
-
             min_h = terrain[i, j]
 
-            for di, dj in directions:
+            for k in range(4):
+                di = directions[k, 0]
+                dj = directions[k, 1]
                 ni = i + di
                 nj = j + dj
 
@@ -160,8 +167,10 @@ def propagate_avalanche(terrain, i0, j0, n_stones, mass_move, static_loc, dynami
 
                     if angle > thresh:
                         extra = angle - thresh
-                        p_avalanche = min(1.0, mass_move * (angle - dynamic_loc) / dynamic_loc) 
-                        if np.random.rand() < p_avalanche:
+                        p_avalanche = max(min(1.0, mass_move * (angle - dynamic_loc) / dynamic_loc), 0)
+                        p = rand_num_list[rand_idx]
+                        rand_idx+=1
+                        if p < p_avalanche:
                             moved = min(n_stones, terrain[i, j])
                             terrain[i, j] -= moved
                             terrain[ni, nj] += moved
@@ -170,31 +179,31 @@ def propagate_avalanche(terrain, i0, j0, n_stones, mass_move, static_loc, dynami
                             affected[ni, nj] = 1
 
                             if moved > 0:
-                                active_i[new_n_active] = ni
-                                active_j[new_n_active] = nj
+                                active[tail, 0], active[tail, 1] = ni, nj
+                                tail+=1
+                                #next 
+                                #next.append((ni, nj))
                                 active_mask[ni, nj] = 1
-                                new_n_active +=1
                 
 
                             dist = np.sqrt((ni - i0)**2 + (nj - j0)**2) #Since runout is generally defined as the downlope trravel dist
                             if dist > runoff_dist:
                                 runoff_dist = dist
         
-        n_active = new_n_active
-        avalanche_area = np.sum(affected)
-        steps += 1    
+        steps += 1  
+    avalanche_area = np.sum(affected)  
         
         
-    return terrain, runoff_dist, n_topples, avalanche_area
+    return terrain, runoff_dist, n_topples, avalanche_area, rand_idx
 
 
 p = 0.02 #Growth probability
 
-import seaborn as sns
 
 
-target_num_avalanches = 300  #300
-repititions = 100 #100
+
+target_num_avalanches = 150 
+repititions = 50 #100
 size_of_terrain = 128
 
 all_runouts = {planet: [] for planet, g in planet_data}
@@ -206,8 +215,6 @@ all_runouts = {planet: [] for planet, g in planet_data}
 all_sizes = {planet: [] for planet, g, in planet_data}
 all_areas = {planet: [] for planet, g in planet_data}
 
-max_runouts_per_planet = {planet: [] for planet, g in planet_data}
-
 terrains_different_planets = {planet : [] for planet, g in planet_data}
 
 for planet, g in planet_data:
@@ -217,7 +224,6 @@ for planet, g in planet_data:
     
     print(planet)
     #gravity_factors = [stones, mu_fric]
-
 
     for rep in range(repititions):
         print(rep)
@@ -231,41 +237,21 @@ for planet, g in planet_data:
 
         num_avalanches = 0
 
-        affected = np.zeros_like(terrain)
-        active_mask = np.zeros_like(affected)
-
-        old_num = 0
         while num_avalanches < target_num_avalanches:
-            if num_avalanches!=0:
-                if rep == 0 and target_num_avalanches%num_avalanches==0 and old_num != num_avalanches:
-                    if planet == "Jupiter":
-                        vmax_for_planet = 50
-                    else:
-                        vmax_for_planet = 5
-                    sns.heatmap(terrain, vmax = vmax_for_planet, cmap='coolwarm')
-                    plt.title(f"Number of rocks per cell, {planet}, num_avalanches = {num_avalanches}")
-                    plt.xlabel("x")
-                    plt.ylabel("y")
-                    plt.show()
-
-            old_num = num_avalanches
+            for _ in range(50):
             #print(planet, rep, num_avalanches)
 
-            terrain, i0, j0 = stones_added(terrain)
+                terrain, i0, j0 = stones_added(terrain)
 
-            #i0 = np.random.randint(Ni)
-            #j0 = np.random.randint(Nj)
-
-            terrain, runoff, n_topples, avalanche_area = propagate_avalanche(terrain, i0, j0, stones, mass_move, static, dynamic, affected, active_mask)
-            if n_topples > 0:
-                runoff_dist_list.append(runoff)
-                num_avalanches += 1
-                avalanche_sizes_list.append(n_topples)
-                avalanche_areas_list.append(avalanche_area)
-            
+                terrain, runoff, n_topples, avalanche_area, rand_idx = propagate_avalanche(terrain, i0, j0, stones, mass_move, static, dynamic, rand_numbers, rand_idx)
+                if n_topples > 0:
+                    runoff_dist_list.append(runoff)
+                    num_avalanches += 1
+                    avalanche_sizes_list.append(n_topples)
+                    avalanche_areas_list.append(avalanche_area)
 
         if runoff_dist_list:
-            mean_runouts_per_rep[planet].append(np.median(runoff_dist_list))
+            mean_runouts_per_rep[planet].append(np.mean(runoff_dist_list))
             mean_sizes_per_rep[planet].append(np.mean(avalanche_sizes_list))
             mean_areas_per_rep[planet].append(np.mean(avalanche_areas_list))
 
@@ -280,11 +266,11 @@ for planet, g in planet_data:
         mean_runout = np.mean(runoff_dist_list)
         median_runout = np.median(runoff_dist_list)
         std_runout = np.std(runoff_dist_list)
-        max_runouts_per_planet[planet].append(np.max(runoff_dist_list))
+        max_runout = np.max(runoff_dist_list)
         if rep == 0:
             terrains_different_planets[planet] = terrain.copy()
 
-        print(f"{planet} rep {rep}: mean={mean_runout:.2f}, median = {median_runout}, std={std_runout:.2f}")
+        print(f"{planet} rep {rep}: mean={mean_runout:.2f}, median = {median_runout}, std={std_runout:.2f}, max = {max_runout:.2f}")
 
 
 gravities = [g for planet, g in planet_data]
@@ -305,24 +291,15 @@ planet_colours = {
 
 mean_runouts = []
 err_runouts = []
-median_runouts = []
-err_runouts_median = []
 
 mean_sizes = []
 err_sizes = []
-median_sizes = []
-err_sizes_median = []
 
 mean_areas = []
 err_areas = []
-median_areas = []
-err_areas_median = []
-
-max_runout_distance = []
-max_runout_dist_err = []
 
 gravities = []
-
+mean_runouts = []
 for planet, g in planet_data:
     gravities.append(g)
 
@@ -331,31 +308,16 @@ for planet, g in planet_data:
     mean_runouts.append(np.median(rep_means))
     err_runouts.append(rep_means.std(ddof=1) / np.sqrt(len(rep_means)))
 
-    rep_median = np.array(all_runouts[planet])
-    median_runouts.append(np.median(rep_median))
-    err_runouts_median.append(rep_median.std(ddof=1) / np.sqrt(len(rep_median)))
-
     #Sizes
     sizes = np.array(mean_sizes_per_rep[planet])
-    mean_sizes.append(np.mean(sizes))
+    mean_sizes.append(np.median(sizes))
     err_sizes.append(sizes.std(ddof=1) / np.sqrt(len(sizes)))
-    sized_median = np.array(all_sizes[planet])
-    median_sizes.append(np.median(sized_median))
-    err_sizes_median.append(sized_median.std(ddof=1) / np.sqrt(len(sized_median)))
 
     #Area
     areas = np.array(mean_areas_per_rep[planet])
-    mean_areas.append(np.mean(areas))
+    mean_areas.append(np.median(areas))
     err_areas.append(areas.std(ddof=1) / np.sqrt(len(areas)))
-    area_median = np.array(all_areas[planet])
-    median_areas.append(np.median(area_median))
-    err_areas_median.append(area_median.std(ddof=1) / np.sqrt(len(area_median)))
 
-    #Max
-    max_runout = np.array(max_runouts_per_planet[planet])
-    max_runout_distance.append(np.mean(max_runout))
-    max_runout_dist_err.append(max_runout.std(ddof=1) / np.sqrt(len(max_runout)))
-  #Mean runout distances
 fig, ax = plt.subplots()
 for i, (planet, g) in enumerate(planet_data):
     print(f"{planet}: g = {gravities}, mean_runouts = {mean_runouts}")
@@ -370,51 +332,27 @@ for i, (planet, g) in enumerate(planet_data):
         elinewidth=1.5,
         label=planet
     )
+
 ax.set_xlabel("Gravity (m/s^2)")
 ax.set_ylabel("Mean runout distance (grid units)")
 #plt.xscale("log")
 #plt.yscale("log")
 ax.set_facecolor("none")
 fig.patch.set_alpha(0)
-ax.set_title("Effect of gravity on mean avalanche runout distance")
+ax.set_title("Effect of gravity on avalanche runout")
 ax.grid(True)
+ax.set_ylim(1.05, 1.45)
 ax.margins(y=0.05)
 ax.legend()
+
 plt.tight_layout()
 plt.show()
 
 
-#median runout distances
+
 fig, ax = plt.subplots()
 for i, (planet, g) in enumerate(planet_data):
-    plt.errorbar(
-        gravities[i],
-        median_runouts[i],
-        yerr = err_runouts_median[i],
-        fmt = 'o',
-        color=planet_colours[planet],
-        capsize = 4,
-        markersize=8,
-        elinewidth=1.5,
-        label=planet
-    )
-ax.set_xlabel("Gravity (m/s^2)")
-ax.set_ylabel("Median runout distance (grid units)")
-#plt.xscale("log")
-#plt.yscale("log")
-ax.set_facecolor("none")
-fig.patch.set_alpha(0)
-ax.set_title("Effect of gravity on median avalanche runout distance")
-ax.grid(True)
-ax.margins(y=0.05)
-ax.legend()
-plt.tight_layout()
-plt.show()
-
-
-#Mean avalanche size (number of topples)
-fig, ax = plt.subplots()
-for i, (planet, g) in enumerate(planet_data):
+    print(f"{planet}: g = {gravities}, mean_size = {mean_sizes}")
     plt.errorbar(
         gravities[i],
         mean_sizes[i],
@@ -428,7 +366,7 @@ for i, (planet, g) in enumerate(planet_data):
 )
 ax.set_xlabel("Gravity (m/s^2)")
 ax.set_ylabel("Mean avalanche size (number of topples)")
-ax.set_title("Effect of gravity on mean avalanche size")
+ax.set_title("Effect of gravity on avalanche size")
 ax.grid(True)
 #plt.xscale("log")
 #plt.yscale("log")
@@ -437,98 +375,51 @@ ax.set_facecolor("none")
 fig.patch.set_alpha(0)
 ax.legend()
 plt.show()
+
 fig, ax = plt.subplots()
 
-#Median avalanche size (number of topples)
-fig, ax = plt.subplots()
+from scipy.stats import skew, kurtosis
 for i, (planet, g) in enumerate(planet_data):
-    plt.errorbar(
-        gravities[i],
-        median_sizes[i],
-        yerr=err_sizes_median[i],
-        fmt='o',
-        color=planet_colours[planet],
-        capsize=4,
-        markersize=8,
-        elinewidth=1.5,
-        label=planet
-)
-ax.set_xlabel("Gravity (m/s^2)")
-ax.set_ylabel("Median avalanche size (number of topples)")
-ax.set_title("Effect of gravity on median avalanche size")
-ax.grid(True)
-#plt.xscale("log")
-#plt.yscale("log")
-plt.tight_layout()
-ax.set_facecolor("none")
-fig.patch.set_alpha(0)
-ax.legend()
-plt.show()
-fig, ax = plt.subplots()
+    # = np.mean(runoff_dist_list)
+    #median_runout = np.median(runoff_dist_list)
+    #max_runout = np.max(runoff_dist_list)
+    #std_runout = np.std(runoff_dist_list)
 
-#Mean avalanche area (cells affected)
-fig, ax = plt.subplots()
-for i, (planet, g) in enumerate(planet_data):
+    #skew_val = skew(runoff_dist_list)
+    #kurt_val = kurtosis(runoff_dist_list)
+
+    #tau = fit_power_law_tail(runoff_dist_list)
+
+    #system_size = size_of_terrain
+    #large_events = [r for r in runoff_dist_list if r > 0.3 * system_size]
+    #fraction_large = len(large_events) / len(runoff_dist_list)
+
+    print(f"{planet}: g = {gravities}, mean_size = {mean_areas}")
+
     plt.errorbar(
         gravities[i],
         mean_areas[i],
-        yerr=err_areas[i],
+        yerr = err_areas[i],
         fmt='o',
         color=planet_colours[planet],
         capsize=4,
-        markersize=8,
+        markersize = 8,
         elinewidth=1.5,
         label=planet
 )
-ax.set_xlabel("Gravity (m/s^2)")
-ax.set_ylabel("Mean avalanche area (number of cells)")
-ax.set_title("Effect of gravity on mean avalanche area")
+ax.set_xlabel("Gravity(m/s^2)")
+ax.set_ylabel("Mean avalanche area (cells affected)")
+ax.title("Effect of gravity on avalanche area")
 ax.grid(True)
+ax.set_facecolor("none")
+fig.patch.set_alpha(0)
 #plt.xscale("log")
 #plt.yscale("log")
 plt.tight_layout()
-ax.set_facecolor("none")
-fig.patch.set_alpha(0)
 ax.legend()
 plt.show()
-fig, ax = plt.subplots()
 
-#Median avalanche area (cells affected)
-fig, ax = plt.subplots()
-for i, (planet, g) in enumerate(planet_data):
-    plt.errorbar(
-        gravities[i],
-        median_areas[i],
-        yerr=err_areas_median[i],
-        fmt='o',
-        color=planet_colours[planet],
-        capsize=4,
-        markersize=8,
-        elinewidth=1.5,
-        label=planet
-)
-ax.set_xlabel("Gravity (m/s^2)")
-ax.set_ylabel("Median avalanche area (number of cells)")
-ax.set_title("Effect of gravity on median avalanche area")
-ax.grid(True)
-#plt.xscale("log")
-#plt.yscale("log")
-plt.tight_layout()
-ax.set_facecolor("none")
-fig.patch.set_alpha(0)
-ax.legend()
-plt.show()
-fig, ax = plt.subplots()
-
-#Max values
-
-
-
-
-
-
-
-
+plt.figure()
 
 
 fig, axes = plt.subplots(2,4, figsize=(14,16), sharex=True, sharey=True)
@@ -584,26 +475,7 @@ fig.colorbar(im, ax = axes.ravel().tolist(), label = "Height (particles)")
 plt.tight_layout()
 plt.show()
 
-
-
-
-
-
-
-
-
-
-
-#Graph of two steps for each of the extremes?
-#Mean run-out vs. gravity
-#Mean size vs. gravity
-#Median runout vs. gravity
-#Median size vs. gravity
-#mean/median tupple size vs. gravity
-#same for all except for size 1
-#
-
-plt.show()
+"""plt.show()
 planet_means= []
 planet_stds = []
 for planet, g in planet_data:
@@ -745,7 +617,7 @@ fig.suptitle("Runout distance distribution across planets")
 #plt.tight_layout()
 plt.show()
 
-"""
+
 Low-Gravity planets have rarer but more extreme avalanches (higher skeness and kurtosis)
 High gravity planets proudce longer and more symmetric runout, resulting in higher median runout and reduced distribution skew
 Mean area and size decreases with gravity up to Earth like conditions, but increases again at very high gravity, usggesting competining stabilising effects
@@ -760,5 +632,4 @@ Median is one for all planets except jupiter, indicating gravity mainly affects 
 
 
 """
-
 

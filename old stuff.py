@@ -20,20 +20,16 @@ plt.rcParams.update({
     "legend.fontsize": 13
 })
 
-
-
 plt.margins(y=0.05)
-
 
 def slope_for_gravity(g, static = 6, dynamic = 3):
     f = np.sqrt(g / 9.81)
-
     static = static * (1 + alpha * (1- f))
-
     dynamic = dynamic * (1- beta * (1-f))
-
     static = max(static, 0.5)
     dynamic = max(dynamic, 0.1)
+    if dynamic >= static:
+        dynamic = static * 0.95
     return static, dynamic
 
 def mass_move_calc(g, g_ref = 9.81, mass_move_max = 2.0, mass_move_min = 0.05):
@@ -47,29 +43,11 @@ def mass_move_calc(g, g_ref = 9.81, mass_move_max = 2.0, mass_move_min = 0.05):
     return max(min(val, mass_move_max), mass_move_min) #https://www.nature.com/articles/s41526-023-00308-w
 
 
-#More stones topple if the gravity is lower I think, but I got to find a source?
-@njit
-def stones_per_topple(g):
-    orig_n_stones = max(1, int(2 * 9.81/g))
-    #friction_stones = max (1, int(orig_n_stones*fric))
-    return 1
-
 def stones_added(terrain, p):
-    """
-    Function to grow new stones in the terrain.
-    
-    Parameters
-    ==========
-    terrain: 2-dimensional array
-    p: Probability for a tree to be generated in an empty cell
-    """
-
-    Ni, Nj = terrain.shape #Dimensions of terrain
-
-    new_rocks = np.random.rand(Ni, Nj) #Random number in each place to calc whether stone drops
-
-    new_rocks_indices = np.where(new_rocks <= p) #The indices at which new stones drop
-    terrain[new_rocks_indices] += 1 #Add stones
+    Ni, Nj = terrain.shape 
+    new_rocks = np.random.rand(Ni, Nj) 
+    new_rocks_indices = np.where(new_rocks <= p) 
+    terrain[new_rocks_indices] += 1 
 
     return terrain
 
@@ -78,26 +56,14 @@ min_runoff = 2.0
 
 @njit
 def propagate_avalanche(terrain, i0, j0, n_stones, mass_move, static_loc, dynamic_loc):
-    """
-    Function to propagate the avalanche on a terrain.
-    
-    Parameters
-    ==========
-    terrain: 2-dimensional array
-    i0: First index of the cell where the avalanche occurs
-    j0: Second index of the cell where the avalanche occurs
-    """
-    #n_stones = grav[0]
-    #fric = grav[1]
     n_topples = 0
     affected = np.zeros_like(terrain)
     affected[i0, j0] = 1
 
-    Ni, Nj = terrain.shape #Dimensions of the terrain
+    Ni, Nj = terrain.shape 
 
     if j0 <= 1 or j0 >= Nj - 1 or i0 <= 1 or i0 >= Ni-1:
         return terrain, 0.0, 0, 0
-
 
     runoff_dist = 0
 
@@ -136,9 +102,7 @@ def propagate_avalanche(terrain, i0, j0, n_stones, mass_move, static_loc, dynami
 
                 if 0 <= ni < Ni and 0 <= nj < Nj:
                     angle = terrain[i,j] - terrain[ni, nj]
-
                     #To add some randomness, since real granular flow is kind of stiochastic, especially right at the border
-
                     if angle > thresh:
                         extra = angle - thresh
                         p_avalanche = min(1.0, mass_move * (angle - dynamic_loc) / dynamic_loc) #Friction
@@ -164,34 +128,21 @@ def propagate_avalanche(terrain, i0, j0, n_stones, mass_move, static_loc, dynami
         
         
     return terrain, runoff_dist, n_topples, avalanche_area
-
-
 p = 0.02 #Growth probability
-
-
-
-
 target_num_avalanches = 300 
 repititions = 100
 size_of_terrain = 128
-
 all_runouts = {planet: [] for planet, g in planet_data}
 mean_runouts_per_rep = {planet: [] for planet, g in planet_data}
 mean_sizes_per_rep = {planet: [] for planet, g in planet_data}
 mean_areas_per_rep = {planet: [] for planet, g in planet_data}
-
-all_runouts = {planet: [] for planet, g in planet_data}
-all_sizes = {planet: [] for planet, g, in planet_data}
+all_sizes = {planet: [] for planet, g in planet_data}
 all_areas = {planet: [] for planet, g in planet_data}
 
 for planet, g in planet_data:
     mass_move = mass_move_calc(g)
-    stones = stones_per_topple(g)
+    stones = 1
     static, dynamic = slope_for_gravity(g)
-    
-    print(planet)
-    #gravity_factors = [stones, mu_fric]
-
     for rep in range(repititions):
         print(rep)
         terrain = np.zeros([size_of_terrain,size_of_terrain]) #Empty terrain
@@ -205,7 +156,6 @@ for planet, g in planet_data:
         num_avalanches = 0
 
         while num_avalanches < target_num_avalanches:
-            #print(planet, rep, num_avalanches)
 
             terrain = stones_added(terrain, p)
 
@@ -251,10 +201,6 @@ planet_colours = {
     "Uranus": "cyan",
     "Neptune": "black"
 }
-
-
-
-
 mean_runouts = []
 err_runouts = []
 
@@ -473,8 +419,6 @@ def propagate_avalanche(terrain, i0, j0, n_stones, mass_move, static_loc, dynami
 
             thresh = dynamic_loc if active_mask[i, j] else static_loc
 
-            min_h = terrain[i, j]
-
             for di, dj in directions:
                 ni = i + di
                 nj = j + dj
@@ -488,9 +432,9 @@ def propagate_avalanche(terrain, i0, j0, n_stones, mass_move, static_loc, dynami
                         extra = angle - thresh
                         p_avalanche = min(1.0, mass_move * (angle - dynamic_loc) / dynamic_loc) #Friction
                         if np.random.rand() < p_avalanche:
-
-                            terrain[i, j] -= min(n_stones, terrain[i,j])
-                            terrain[ni, nj] += min(n_stones, terrain[i, j])
+                            moved = min(n_stones, terrain[i, j])
+                            terrain[i, j] -= moved
+                            terrain[ni, nj] += moved
 
                             n_topples += 1
                             affected[ni, nj] = 1
@@ -602,89 +546,198 @@ planet_colours = {
 
 mean_runouts = []
 err_runouts = []
+median_runouts = []
+err_median_runouts = []
 
 mean_sizes = []
 err_sizes = []
+median_size = []
+err_median_size = []
 
 mean_areas = []
 err_areas = []
+median_area = []
+err_median_area = []
 
 gravities = []
 mean_runouts = []
+
+from scipy.stats import skew, kurtosis
+
+runout_skew = []
+size_skew = []
+area_skew = []
+
+runout_kurtosis = []
+size_kurtosis = []
+area_kurtosis = []
+
+runout_fraction = []
+size_fraction = []
+area_fraction = []
+
+Threshold_runout = 3
+Threshold_area = 5
+Threshold_topple = 5
 for planet, g in planet_data:
     gravities.append(g)
 
     #Runout
     rep_means = np.array(mean_runouts_per_rep[planet])
     mean_runouts.append(np.median(rep_means))
-    err_runouts.append(rep_means.std(ddof=1) / np.sqrt(len(rep_means)))
+    err_runouts.append(rep_means.std(ddof=1))
+
+    #Median
+    all_runout_loc = all_runouts[planet]
+    median_runouts.append(np.median(all_runout_loc))
+    err_median_runouts.append(all_runout_loc.std(ddof=1))
+
+    #Skew
+    runout_skew.append(skew(all_runout_loc))
+    #Kurtosis
+    runout_kurtosis.append(kurtosis(all_runout_loc))
+    #Fraction
+    runout_fraction.append(all_runout_loc>Threshold_runout)
+
 
     #Sizes
     sizes = np.array(mean_sizes_per_rep[planet])
     mean_sizes.append(np.median(sizes))
-    err_sizes.append(sizes.std(ddof=1) / np.sqrt(len(sizes)))
+    err_sizes.append(sizes.std(ddof=1))
+
+    #Median
+    all_sizes_loc = all_sizes[planet]
+    median_runouts.append(np.median(all_sizes_loc))
+    err_median_runouts.append(all_sizes_loc.std(ddof=1))
+
+    #Skew
+    size_skew.append(skew(all_sizes_loc))
+    #kurtosis
+    size_kurtosis.append(kurtosis(all_sizes_loc))
+    #Fractin
+    size_fraction.append(all_sizes_loc>Threshold_topple)
+
 
     #Area
     areas = np.array(mean_areas_per_rep[planet])
     mean_areas.append(np.median(areas))
-    err_areas.append(areas.std(ddof=1) / np.sqrt(len(areas)))
+    err_areas.append(areas.std(ddof=1))
 
-fig, ax = plt.subplots()
-for i, (planet, g) in enumerate(planet_data):
-    print(f"{planet}: g = {gravities}, mean_runouts = {mean_runouts}")
-    plt.errorbar(
-        gravities[i],
-        mean_runouts[i],
-        yerr = err_runouts[i],
-        fmt = 'o',
-        color=planet_colours[planet],
-        capsize = 4,
-        markersize=8,
-        elinewidth=1.5,
-        label=planet
-    )
+    #Median
+    all_areas_loc = all_areas[planet]
+    median_runouts.append(np.median(all_sizes_loc))
+    err_median_runouts.append(all_sizes_loc.std(ddof=1))
 
-ax.set_xlabel("Gravity (m/s^2)")
-ax.set_ylabel("Mean runout distance (grid units)")
-#plt.xscale("log")
-#plt.yscale("log")
-ax.set_facecolor("none")
-fig.patch.set_alpha(0)
-ax.set_title("Effect of gravity on avalanche runout")
-ax.grid(True)
-ax.set_ylim(1.05, 1.45)
-ax.margins(y=0.05)
-ax.legend()
-
-plt.tight_layout()
-plt.show()
+    #Skew
+    area_skew.append(skew(all_areas_loc))
+    #Kurtosis
+    area_kurtosis.append(kurtosis(all_areas_loc))
+    #Fraction
+    area_fraction.append(all_areas_loc>Threshold_area)
 
 
 
-plt.figure()
-for i, (planet, g) in enumerate(planet_data):
-    print(f"{planet}: g = {gravities}, mean_size = {mean_sizes}")
-    plt.errorbar(
-        gravities[i],
-        mean_sizes[i],
-        yerr=err_sizes[i],
-        fmt='o',
-        color=planet_colours[planet],
-        capsize=4,
-        markersize=8,
-        elinewidth=1.5,
-        label=planet
-)
-plt.xlabel("Gravity (m/s^2)")
-plt.ylabel("Mean avalanche size (number of topples)")
-plt.title("Effect of gravity on avalanche size")
-plt.grid(True)
-#plt.xscale("log")
-#plt.yscale("log")
-plt.tight_layout()
-ax.set_facecolor("none")
-fig.patch.set_alpha(0)
-plt.legend()
-plt.show()
+def graph(yname, name, y, error, ymin, ymax):
+    fig, ax = plt.subplots()
+    for i, (planet, g) in enumerate(planet_data):
+        print(f"{planet}: g = {g}, {name} = {y[i]}")   
+        plt.errorbar(
+            gravities[i], 
+            y[i],
+            yerr = error[i],
+            fmt = 'o',
+            color = planet_colours[planet],
+            capsize=4,
+            markersize = 8,
+            elinewidth=1.5,
+            label=planet
+        )
+    ax.set_xlabel("Gravity (m/s^2)")
+    ax.set_ylabel(yname)
+    ax.set_facecolor("none")
+    fig.patch.set_alpha(0)
+    ax.set_title(name)
+    ax.grid(True)
+    ax.set_ylim(ymin, ymax)
+    ax.margins(y=0.05)
+    ax.legend()
+    plt.tight_layout()
+    plt.show()
 
-plt.figure()
+def graph_without_error(yname, name, y):
+    fig, ax = plt.subplots()
+    for i, (planet, g) in enumerate(planet_data):
+        print(f"{planet}: g = {g}, {name} = {y[i]}")   
+        plt(
+            gravities[i], 
+            y[i],
+            fmt = 'o',
+            color = planet_colours[planet],
+            capsize=4,
+            markersize = 8,
+            elinewidth=1.5,
+            label=planet
+        )
+    ax.set_xlabel("Gravity (m/s^2)")
+    ax.set_ylabel(yname)
+    ax.set_facecolor("none")
+    fig.patch.set_alpha(0)
+    ax.set_title(name)
+    ax.grid(True)
+    ax.margins(y=0.05)
+    ax.legend()
+    plt.tight_layout()
+    plt.show()
+
+#Mean runout
+graph("Mean runout distance (grid units)", "Effects of gravity on avalanche runout", mean_runouts, err_runouts, 1.05, 1.45)
+
+#Median runout
+graph("Median runout distance (grid units)", "Effects of gravity on avalanche runout", median_runouts, err_median_runouts, 1.05, 1.45)
+
+#skewness runout
+graph_without_error("Skewness for all runouts for planet", "Skewness of runout for different planets", runout_skew)
+
+#kurtosis runout
+graph_without_error("Kurtosis for all runouts for planet", "Kurtosis of runout for different planets", runout_kurtosis)
+
+#Fraction runout
+graph_without_error("Fraction of large avalanche (runouts>3 grid units)", "Fraction of large avalanches for different planets", runout_fraction)
+
+
+
+
+#Mean Area
+graph("Mean area (grid units)", "Effects of gravity on avalanche area", mean_areas, err_areas, 1.05, 1.45)
+
+#Median area
+graph("Median area (grid units)", "Effects of gravity on avalanche area", median_area, err_median_area, 1.05, 1.45)
+
+#skewness area
+graph_without_error("Skewness for all areas for planet", "Skewness of area for different planets", area_skew)
+
+#Kurtosis area
+graph_without_error("Kurtosis for all areas for planet", "Kurtosis of area for different planets", area_kurtosis)
+
+#Fractijon area
+graph_without_error("Fraction of large avalanche (Area > 5 cells)", "Fraction of large avalanches for different planets", area_fraction)
+
+
+
+
+
+#Mean num of topples
+graph("Mean size (number of topples)", "Effects of gravity on mean size", mean_sizes, err_sizes, 1.05, 1.45)
+
+#Median num of topples
+graph("Median size (number of topples)", "Effects of gravity on median size", median_size, err_median_size, 1.05, 1.45)
+
+#skewness num of topples
+graph_without_error("Skewness for all sizes for planet", "Skewness of sizes for different planets", size_skew)
+
+#Kurtosis size
+graph_without_error("Kurtosis for all sizes for planet", "Kurtosis of sizes for different planets", size_kurtosis)
+
+#Fraction
+graph_without_error("Fractiion of large avalanches (num topples > 5)", "Fraction of large avalanches for different planets", size_fraction)
+
